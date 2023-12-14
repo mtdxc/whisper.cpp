@@ -1,8 +1,5 @@
 #pragma once
 
-#include <SDL.h>
-#include <SDL_audio.h>
-
 #include <atomic>
 #include <cstdint>
 #include <vector>
@@ -32,7 +29,7 @@ public:
     void get(int ms, std::vector<float> & audio);
 
 private:
-    SDL_AudioDeviceID m_dev_id_in = 0;
+    uint32_t m_dev_id_in = 0;
 
     int m_len_ms = 0;
     int m_sample_rate = 0;

@@ -1,8 +1,14 @@
 #include "common-sdl.h"
+#ifdef _WIN32
+#include <SDL2\SDL.h>
+#include <SDL2\SDL_audio.h>
+#else
+#include <SDL.h>
+#include <SDL_audio.h>
+#endif
 
 audio_async::audio_async(int len_ms) {
     m_len_ms = len_ms;
-
     m_running = false;
 }
 

@@ -12,7 +12,7 @@
 #include <thread>
 #include <vector>
 #include <fstream>
-
+#include <string.h>
 
 //  500 -> 00:05.000
 // 6000 -> 01:00.000
@@ -51,8 +51,8 @@ struct whisper_params {
     bool save_audio    = false; // save audio to wav file
     bool use_gpu       = true;
 
-    std::string language  = "en";
-    std::string model     = "models/ggml-base.en.bin";
+    std::string language  = "auto";
+    std::string model     = "models/ggml-base.bin";
     std::string fname_out;
 };
 
@@ -149,8 +149,14 @@ int main(int argc, char ** argv) {
     params.no_context    |= use_vad;
     params.max_tokens     = 0;
 
-    // init audio
+    // whisper init
+    if (params.language != "auto" && whisper_lang_id(params.language.c_str()) == -1) {
+        fprintf(stderr, "error: unknown language '%s'\n", params.language.c_str());
+        whisper_print_usage(argc, argv, params);
+        exit(0);
+    }
 
+    // init audio
     audio_async audio(params.length_ms);
     if (!audio.init(params.capture_id, WHISPER_SAMPLE_RATE)) {
         fprintf(stderr, "%s: audio.init() failed!\n", __func__);
@@ -159,17 +165,11 @@ int main(int argc, char ** argv) {
 
     audio.resume();
 
-    // whisper init
-    if (params.language != "auto" && whisper_lang_id(params.language.c_str()) == -1){
-        fprintf(stderr, "error: unknown language '%s'\n", params.language.c_str());
-        whisper_print_usage(argc, argv, params);
-        exit(0);
-    }
-
     struct whisper_context_params cparams;
     cparams.use_gpu = params.use_gpu;
 
     struct whisper_context * ctx = whisper_init_from_file_with_params(params.model.c_str(), cparams);
+    if (!ctx) return;
 
     std::vector<float> pcmf32    (n_samples_30s, 0.0f);
     std::vector<float> pcmf32_old;
@@ -242,15 +242,14 @@ int main(int argc, char ** argv) {
         if (params.save_audio) {
             wavWriter.write(pcmf32_new.data(), pcmf32_new.size());
         }
+
         // handle Ctrl + C
         is_running = sdl_poll_events();
-
         if (!is_running) {
             break;
         }
 
         // process new audio
-
         if (!use_vad) {
             while (true) {
                 audio.get(params.step_ms, pcmf32_new);
@@ -291,7 +290,6 @@ int main(int argc, char ** argv) {
 
             if (t_diff < 2000) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
                 continue;
             }
 
@@ -301,7 +299,6 @@ int main(int argc, char ** argv) {
                 audio.get(params.length_ms, pcmf32);
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
                 continue;
             }
 
