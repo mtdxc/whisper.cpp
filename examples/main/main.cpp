@@ -38,6 +38,8 @@ std::string to_timestamp(int64_t t, bool comma = false) {
     return std::string(buf);
 }
 
+// time to sample_count
+// n_samples is total sample count
 int timestamp_to_sample(int64_t t, int n_samples) {
     return std::max(0, std::min((int) n_samples - 1, (int) ((t*WHISPER_SAMPLE_RATE)/100)));
 }
@@ -92,10 +94,10 @@ struct whisper_params {
     bool log_score       = false;
     bool use_gpu         = true;
 
-    std::string language  = "en";
+    std::string language  = "auto";
     std::string prompt;
     std::string font_path = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf";
-    std::string model     = "models/ggml-base.en.bin";
+    std::string model     = "models/ggml-base.bin";
 
     // [TDRZ] speaker turn string
     std::string tdrz_speaker_turn = " [SPEAKER_TURN]"; // TODO: set from command line
@@ -234,8 +236,9 @@ struct whisper_print_user_data {
     int progress_prev;
 };
 
-std::string estimate_diarization_speaker(std::vector<std::vector<float>> pcmf32s, int64_t t0, int64_t t1, bool id_only = false) {
+std::string estimate_diarization_speaker(const std::vector<std::vector<float>>& pcmf32s, int64_t t0, int64_t t1, bool id_only = false) {
     std::string speaker = "";
+    // 比较左右声道数据音量，返回(speaker 0,1或?)
     const int64_t n_samples = pcmf32s[0].size();
 
     const int64_t is0 = timestamp_to_sample(t0, n_samples);
@@ -266,6 +269,7 @@ std::string estimate_diarization_speaker(std::vector<std::vector<float>> pcmf32s
 
     return speaker;
 }
+
 void whisper_print_progress_callback(struct whisper_context * /*ctx*/, struct whisper_state * /*state*/, int progress, void * user_data) {
     int progress_step = ((whisper_print_user_data *) user_data)->params->progress_step;
     int * progress_prev  = &(((whisper_print_user_data *) user_data)->progress_prev);
@@ -319,7 +323,8 @@ void whisper_print_segment_callback(struct whisper_context * ctx, struct whisper
                 const char * text = whisper_full_get_token_text(ctx, i, j);
                 const float  p    = whisper_full_get_token_p   (ctx, i, j);
 
-                const int col = std::max(0, std::min((int) k_colors.size() - 1, (int) (std::pow(p, 3)*float(k_colors.size()))));
+                int col = (int) (std::pow(p, 3)*float(k_colors.size()));
+                col = std::max(0, std::min((int) k_colors.size() - 1, col));
 
                 printf("%s%s%s%s", speaker.c_str(), k_colors[col].c_str(), text, "\033[0m");
             }
@@ -344,7 +349,7 @@ void whisper_print_segment_callback(struct whisper_context * ctx, struct whisper
     }
 }
 
-bool output_txt(struct whisper_context * ctx, const char * fname, const whisper_params & params, std::vector<std::vector<float>> pcmf32s) {
+bool output_txt(struct whisper_context * ctx, const char * fname, const whisper_params & params, const std::vector<std::vector<float>>& pcmf32s) {
     std::ofstream fout(fname);
     if (!fout.is_open()) {
         fprintf(stderr, "%s: failed to open '%s' for writing\n", __func__, fname);
@@ -371,7 +376,7 @@ bool output_txt(struct whisper_context * ctx, const char * fname, const whisper_
     return true;
 }
 
-bool output_vtt(struct whisper_context * ctx, const char * fname, const whisper_params & params, std::vector<std::vector<float>> pcmf32s) {
+bool output_vtt(struct whisper_context * ctx, const char * fname, const whisper_params & params, const std::vector<std::vector<float>>& pcmf32s) {
     std::ofstream fout(fname);
     if (!fout.is_open()) {
         fprintf(stderr, "%s: failed to open '%s' for writing\n", __func__, fname);
@@ -403,7 +408,7 @@ bool output_vtt(struct whisper_context * ctx, const char * fname, const whisper_
     return true;
 }
 
-bool output_srt(struct whisper_context * ctx, const char * fname, const whisper_params & params, std::vector<std::vector<float>> pcmf32s) {
+bool output_srt(struct whisper_context * ctx, const char * fname, const whisper_params & params, const std::vector<std::vector<float>>& pcmf32s) {
     std::ofstream fout(fname);
     if (!fout.is_open()) {
         fprintf(stderr, "%s: failed to open '%s' for writing\n", __func__, fname);
@@ -463,7 +468,7 @@ char *escape_double_quotes_and_backslashes(const char *str) {
     return escaped;
 }
 
-bool output_csv(struct whisper_context * ctx, const char * fname, const whisper_params & params, std::vector<std::vector<float>> pcmf32s) {
+bool output_csv(struct whisper_context * ctx, const char * fname, const whisper_params & params, const std::vector<std::vector<float>>& pcmf32s) {
     std::ofstream fout(fname);
     if (!fout.is_open()) {
         fprintf(stderr, "%s: failed to open '%s' for writing\n", __func__, fname);
@@ -485,7 +490,7 @@ bool output_csv(struct whisper_context * ctx, const char * fname, const whisper_
         const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
         const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
         char * text_escaped = escape_double_quotes_and_backslashes(text);
-
+        if (!text_escaped) continue;
         //need to multiply times returned from whisper_full_get_segment_t{0,1}() by 10 to get milliseconds.
         fout << 10 * t0 << "," << 10 * t1 << ",";
         if (params.diarize && pcmf32s.size() == 2)
@@ -493,12 +498,13 @@ bool output_csv(struct whisper_context * ctx, const char * fname, const whisper_
             fout << estimate_diarization_speaker(pcmf32s, t0, t1, true) << ",";
         }
         fout << "\"" << text_escaped << "\"\n";
+        free(text_escaped);
     }
 
     return true;
 }
 
-bool output_score(struct whisper_context * ctx, const char * fname, const whisper_params & /*params*/, std::vector<std::vector<float>> /*pcmf32s*/) {
+bool output_score(struct whisper_context * ctx, const char * fname, const whisper_params & /*params*/, const std::vector<std::vector<float>>& /*pcmf32s*/) {
     std::ofstream fout(fname);
     fprintf(stderr, "%s: saving output to '%s'\n", __func__, fname);
 
@@ -521,7 +527,7 @@ bool output_json(
              struct whisper_context * ctx,
                          const char * fname,
                const whisper_params & params,
-    std::vector<std::vector<float>>   pcmf32s,
+    const std::vector<std::vector<float>>&   pcmf32s,
                                bool   full) {
     std::ofstream fout(fname);
     int indent = 0;
@@ -687,7 +693,7 @@ bool output_json(
 // karaoke video generation
 // outputs a bash script that uses ffmpeg to generate a video with the subtitles
 // TODO: font parameter adjustments
-bool output_wts(struct whisper_context * ctx, const char * fname, const char * fname_inp, const whisper_params & params, float t_sec, std::vector<std::vector<float>> pcmf32s) {
+bool output_wts(struct whisper_context * ctx, const char * fname, const char * fname_inp, const whisper_params & params, float t_sec, const std::vector<std::vector<float>>& pcmf32s) {
     std::ofstream fout(fname);
 
     fprintf(stderr, "%s: saving output to '%s'\n", __func__, fname);
@@ -812,7 +818,7 @@ bool output_wts(struct whisper_context * ctx, const char * fname, const char * f
     return true;
 }
 
-bool output_lrc(struct whisper_context * ctx, const char * fname, const whisper_params & params, std::vector<std::vector<float>> pcmf32s) {
+bool output_lrc(struct whisper_context * ctx, const char * fname, const whisper_params & params, const std::vector<std::vector<float>>& pcmf32s) {
     std::ofstream fout(fname);
     if (!fout.is_open()) {
         fprintf(stderr, "%s: failed to open '%s' for writing\n", __func__, fname);
