@@ -325,13 +325,20 @@ void whisper_print_segment_callback(struct whisper_context * ctx, struct whisper
 
                 int col = (int) (std::pow(p, 3)*float(k_colors.size()));
                 col = std::max(0, std::min((int) k_colors.size() - 1, col));
-
+#ifdef _MSC_VER
+                std::string gtext = utf8_to_dbcs(text);
+                text = gtext.c_str();
+#endif // _MSC_VER
                 printf("%s%s%s%s", speaker.c_str(), k_colors[col].c_str(), text, "\033[0m");
             }
         } else {
             const char * text = whisper_full_get_segment_text(ctx, i);
-
+#ifdef _MSC_VER
+            std::string gtext = utf8_to_dbcs(text);
+            text = gtext.c_str();
+#endif // _MSC_VER
             printf("%s%s", speaker.c_str(), text);
+
         }
 
         if (params.tinydiarize) {
@@ -859,6 +866,10 @@ bool output_lrc(struct whisper_context * ctx, const char * fname, const whisper_
 }
 
 int main(int argc, char ** argv) {
+#ifdef _MSC_VER
+    // 避免wprintf没显示
+    setlocale(LC_CTYPE, "");
+#endif
     whisper_params params;
 
     if (whisper_params_parse(argc, argv, params) == false) {

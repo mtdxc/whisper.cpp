@@ -169,7 +169,7 @@ int main(int argc, char ** argv) {
     cparams.use_gpu = params.use_gpu;
 
     struct whisper_context * ctx = whisper_init_from_file_with_params(params.model.c_str(), cparams);
-    if (!ctx) return;
+    if (!ctx) return 1;
 
     std::vector<float> pcmf32    (n_samples_30s, 0.0f);
     std::vector<float> pcmf32_old;
@@ -357,6 +357,10 @@ int main(int argc, char ** argv) {
                 const int n_segments = whisper_full_n_segments(ctx);
                 for (int i = 0; i < n_segments; ++i) {
                     const char * text = whisper_full_get_segment_text(ctx, i);
+#ifdef _MSC_VER
+                    std::string stext = utf8_to_dbcs(text);
+                    text = stext.c_str();
+#endif // _MSC_VER
 
                     if (params.no_timestamps) {
                         printf("%s", text);
